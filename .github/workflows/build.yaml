@@ -41,10 +41,12 @@ jobs:
       - name: Set Hexagon Architecture
         run: |
           HEX_ARCH="${{ github.event.inputs.hexagon_arch }}"
+
           HTP_TARGETS=""
-          for arch in $(echo "$HEX_ARCH" | tr ';' ' '); do
-            HTP_TARGETS="$HTP_TARGETS htp-$arch"
+          for arch in $(echo "${HEX_ARCH}" | tr ';' ' '); do
+            HTP_TARGETS="${HTP_TARGETS} htp-$arch"
           done
+
           echo "HEXAGON_ARCH=${HEX_ARCH}" >> "$GITHUB_ENV"
           echo "HTP_TARGETS=${HTP_TARGETS}" >> "$GITHUB_ENV"
 
@@ -120,3 +122,14 @@ jobs:
         with:
           path: ${{ env.ARCHIVE_PATH }}
           archive: false
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "llama.cpp Android Hexagon (${{ env.HEXAGON_ARCH }}) - ${{ env.SHORT_SHA }}"
+          body: |
+            Automated Android ARM64 build of `llama.cpp` with Qualcomm Hexagon NPU support.
+            - **llama.cpp ref:** `${{ github.event.inputs.llama_ref }}` (`${{ env.SHORT_SHA }}`)
+            - **Hexagon Archs:** `${{ env.HEXAGON_ARCH }}`
+          files: ${{ env.ARCHIVE_PATH }}
