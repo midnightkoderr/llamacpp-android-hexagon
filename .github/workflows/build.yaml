@@ -1,0 +1,121 @@
+name: Build llama.cpp for Snapdragon Hexagon NPU (Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_ref:
+        description: 'llama.cpp branch, tag, or commit SHA'
+        required: false
+        default: 'master'
+      hexagon_arch:
+        description: 'Hexagon architecture(s) to build for, separated by semicolons'
+        required: false
+        default: 'v73;v75'
+
+jobs:
+  build-android-hexagon:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/snapdragon-toolchain/arm64-android:v0.8
+      options: --platform linux/amd64
+
+    env:
+      ARTIFACT_DIR: ${RUNNER_TEMP}/staging
+      SNAPDRAGON_BUILD_DIR: ${RUNNER_TEMP}/build-snapdragon
+
+    steps:
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ github.event.inputs.llama_ref }}
+
+      - name: Check if CMakeUserPresets.json exists
+        run: |
+          if [ ! -f "docs/backend/snapdragon/CMakeUserPresets.json" ]; then
+            echo "Error: Could not find docs/backend/snapdragon/CMakeUserPresets.json."
+            exit 1
+          fi
+
+      - name: Set Hexagon Architecture
+        run: |
+          HEX_ARCH="${{ inputs.hexagon_arch }}"
+          HTP_TARGETS=""
+          for arch in $(echo "$HEX_ARCH" | tr ';' ' '); do
+            HTP_TARGETS="$HTP_TARGETS htp-$arch"
+          done
+          echo "HEXAGON_ARCH=${HEX_ARCH}" >> "$GITHUB_ENV"
+          echo "HTP_TARGETS=${HTP_TARGETS}" >> "$GITHUB_ENV"
+
+      - name: Print Hexagon Architecture and HTP Targets
+        run: |
+          echo "HEXAGON_ARCH: ${HEXAGON_ARCH}"
+          echo "HTP_TARGETS: ${HTP_TARGETS}"
+
+      - name: Configure CMake with Snapdragon Preset
+        run: |
+          rm -rf "${SNAPDRAGON_BUILD_DIR}"
+
+          cp docs/backend/snapdragon/CMakeUserPresets.json .
+          cmake --preset arm64-android-snapdragon-release \
+            -B "${SNAPDRAGON_BUILD_DIR}" \
+            -DGGML_HEXAGON_ARCHS="${HEXAGON_ARCH}" \
+            -DLLAMA_SERVER_WEBUI=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TOOLS=ON
+
+      - name: Build and Package Binaries
+        run: |
+          cmake --build "${SNAPDRAGON_BUILD_DIR}" \
+            --target llama-cli llama-server llama-bench llama-gguf-split llama-mtmd-cli llama-quantize ${HTP_TARGETS} \
+            --parallel "$(nproc)"
+
+      - name: Package Binaries
+        run: |
+          rm -rf "${ARTIFACT_DIR}"
+          mkdir -p "${ARTIFACT_DIR}/bin" "${ARTIFACT_DIR}/lib"
+
+          for bin in llama-cli llama-server llama-bench llama-gguf-split llama-mtmd-cli llama-quantize; do
+            if [ -f "${SNAPDRAGON_BUILD_DIR}/bin/${bin}" ]; then
+              cp -L "${SNAPDRAGON_BUILD_DIR}/bin/${bin}" "${ARTIFACT_DIR}/bin/"
+            fi
+          done
+
+          find "${SNAPDRAGON_BUILD_DIR}" -name "*.so" -exec cp -L {} "${ARTIFACT_DIR}/lib/" \;
+
+          cat << "EOF" > "${ARTIFACT_DIR}/run.sh"
+          #!/data/data/com.termux/files/usr/bin/sh
+
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:$LD_LIBRARY_PATH"
+          export ADSP_LIBRARY_PATH="${SCRIPT_DIR}/lib;/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp"
+
+          if [ -z "$1" ]; then
+            echo "Usage: ./run.sh <binary_name> [args...]"
+            echo "Example: ./run.sh llama-cli -m model.gguf -p \"Hello\""
+            exit 1
+          fi
+
+          BIN="$1"
+          shift
+          exec "${SCRIPT_DIR}/bin/${BIN}" "$@"
+          EOF
+
+          chmod +x "${ARTIFACT_DIR}/run.sh"
+
+      - name: Create Tarball
+        run: |
+          ARCHIVE_NAME="llama-cpp-android-hexagon.tar.gz"
+          ARCHIVE_PATH="${RUNNER_TEMP}/${ARCHIVE_NAME}"
+          tar --owner=1000 --group=1000 --numeric-owner \
+          -czvf "${ARCHIVE_PATH}" -C "${ARTIFACT_DIR}" .
+
+          echo "ARCHIVE_PATH=${ARCHIVE_PATH}" >> "$GITHUB_ENV"
+          echo "Artifact created: ${ARCHIVE_PATH}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${ARCHIVE_PATH}
+          archive: false
