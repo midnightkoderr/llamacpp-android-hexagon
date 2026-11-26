@@ -84,24 +84,24 @@ jobs:
 
           find "${SNAPDRAGON_BUILD_DIR}" -name "*.so" -exec cp -L {} "${ARTIFACT_DIR}/lib/" \;
 
-          cat << "EOF" > "${ARTIFACT_DIR}/run.sh"
+          cat << 'EOF' > "${ARTIFACT_DIR}/run.sh"
           #!/data/data/com.termux/files/usr/bin/sh
 
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:$LD_LIBRARY_PATH"
           export ADSP_LIBRARY_PATH="${SCRIPT_DIR}/lib;/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp"
 
-          if [ -z "$1" ]; then
+          if [ -z "${1}" ]; then
             echo "Usage: ./run.sh <binary_name> [args...]"
             echo "Example: ./run.sh llama-cli -m model.gguf -p \"Hello\""
             exit 1
           fi
 
-          BIN="$1"
+          BIN="${1}"
           shift
           exec "${SCRIPT_DIR}/bin/${BIN}" "$@"
           EOF
-
+          sed -i 's/^          //' "${ARTIFACT_DIR}/run.sh"
           chmod +x "${ARTIFACT_DIR}/run.sh"
 
       - name: Create Tarball
@@ -117,5 +117,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          path: ${ARCHIVE_PATH}
+          path: ${{ env.ARCHIVE_PATH }}
           archive: false
