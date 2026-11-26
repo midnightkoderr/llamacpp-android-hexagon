@@ -20,8 +20,8 @@ jobs:
       options: --platform linux/amd64
 
     env:
-      ARTIFACT_DIR: ${RUNNER_TEMP}/staging
-      SNAPDRAGON_BUILD_DIR: ${RUNNER_TEMP}/build-snapdragon
+      ARTIFACT_DIR: ${{ runner.temp }}/staging
+      SNAPDRAGON_BUILD_DIR: ${{ runner.temp }}/build-snapdragon
 
     steps:
       - name: Checkout llama.cpp
@@ -39,7 +39,7 @@ jobs:
 
       - name: Set Hexagon Architecture
         run: |
-          HEX_ARCH="${{ inputs.hexagon_arch }}"
+          HEX_ARCH="${{ github.event.inputs.hexagon_arch }}"
           HTP_TARGETS=""
           for arch in $(echo "$HEX_ARCH" | tr ';' ' '); do
             HTP_TARGETS="$HTP_TARGETS htp-$arch"
