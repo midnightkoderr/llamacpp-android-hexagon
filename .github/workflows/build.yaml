@@ -19,11 +19,12 @@ jobs:
       image: ghcr.io/snapdragon-toolchain/arm64-android:v0.8
       options: --platform linux/amd64
 
-    env:
-      ARTIFACT_DIR: ${{ runner.temp }}/staging
-      SNAPDRAGON_BUILD_DIR: ${{ runner.temp }}/build-snapdragon
-
     steps:
+      - name: Initialize Paths
+        run: |
+          echo "ARTIFACT_DIR=${RUNNER_TEMP}/staging" >> "$GITHUB_ENV"
+          echo "SNAPDRAGON_BUILD_DIR=${RUNNER_TEMP}/build-snapdragon" >> "$GITHUB_ENV"
+
       - name: Checkout llama.cpp
         uses: actions/checkout@v4
         with:
