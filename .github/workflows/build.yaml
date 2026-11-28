@@ -98,10 +98,13 @@ jobs:
             VULKAN_LIB=$(find "${NDK_SYSROOT}/usr/lib/aarch64-linux-android" -name "libvulkan.so" | sort -V | tail -n 1)
           fi
 
-          if [ ! -f "/usr/include/vulkan/vulkan.hpp" ] || [ ! -f "${VULKAN_LIB}" ]; then
-            echo "Error: Could not locate host vulkan.hpp or Android NDK libvulkan.so (ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT})"
+          if [ ! -d "${NDK_SYSROOT}/usr/include/vulkan" ] || [ ! -f "${VULKAN_LIB}" ]; then
+            echo "Error: Could not locate Android NDK Vulkan headers or libvulkan.so (ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT})"
             exit 1
           fi
+
+          # Android NDK ships C headers (vulkan.h) but omits C++ bindings (vulkan.hpp); link them from host libvulkan-dev
+          ln -sf /usr/include/vulkan/*.hpp "${NDK_SYSROOT}/usr/include/vulkan/"
 
           SPIRV_HEADERS_CONFIG=$(find /usr -name "SPIRV-HeadersConfig.cmake" 2>/dev/null | head -n 1)
           if [ -z "${SPIRV_HEADERS_CONFIG}" ]; then
@@ -111,7 +114,7 @@ jobs:
           SPIRV_HEADERS_DIR=$(dirname "${SPIRV_HEADERS_CONFIG}")
 
           echo "Using pre-installed NDK: ${ANDROID_NDK_ROOT}"
-          echo "Using Vulkan include: /usr/include"
+          echo "Using Vulkan include: ${NDK_SYSROOT}/usr/include"
           echo "Using Vulkan library: ${VULKAN_LIB}"
           echo "Using SPIRV-Headers: ${SPIRV_HEADERS_DIR}"
 
@@ -121,7 +124,7 @@ jobs:
             -DCMAKE_SYSTEM_VERSION="${{ inputs.android_api }}" \
             -DGGML_HEXAGON_ARCHS="${HEXAGON_ARCH}" \
             -DGGML_VULKAN=ON \
-            -DVulkan_INCLUDE_DIR="/usr/include" \
+            -DVulkan_INCLUDE_DIR="${NDK_SYSROOT}/usr/include" \
             -DVulkan_LIBRARY="${VULKAN_LIB}" \
             -DSPIRV-Headers_DIR="${SPIRV_HEADERS_DIR}" \
             -DLLAMA_SERVER_WEBUI=OFF \
