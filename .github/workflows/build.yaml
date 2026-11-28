@@ -103,13 +103,16 @@ jobs:
             exit 1
           fi
 
-          # Sync host Vulkan 1.4 C and C++ headers (except vulkan_android.h) so vulkan.hpp matches vulkan_core.h
+          # Sync host Vulkan 1.4 C/C++ headers and vk_video directory into NDK sysroot
           for hdr in /usr/include/vulkan/*; do
             base=$(basename "$hdr")
             if [ "$base" != "vulkan_android.h" ]; then
               ln -sf "$hdr" "${NDK_SYSROOT}/usr/include/vulkan/${base}"
             fi
           done
+          if [ -d /usr/include/vk_video ]; then
+            ln -sfn /usr/include/vk_video "${NDK_SYSROOT}/usr/include/vk_video"
+          fi
 
           SPIRV_HEADERS_CONFIG=$(find /usr -name "SPIRV-HeadersConfig.cmake" 2>/dev/null | head -n 1)
           if [ -z "${SPIRV_HEADERS_CONFIG}" ]; then
