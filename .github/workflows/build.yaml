@@ -41,7 +41,7 @@ jobs:
           echo "SNAPDRAGON_BUILD_DIR=${RUNNER_TEMP}/build-snapdragon" >> "$GITHUB_ENV"
           echo "DIST_DIR=${GITHUB_WORKSPACE}/dist" >> "$GITHUB_ENV"
 
-      - name: Install Host Vulkan Shader Compilers
+      - name: Install Host Vulkan Headers and Shader Compilers
         run: |
           apt-get update -qq && apt-get install -y --no-install-recommends \
             libvulkan-dev \
@@ -98,21 +98,18 @@ jobs:
             VULKAN_LIB=$(find "${NDK_SYSROOT}/usr/lib/aarch64-linux-android" -name "libvulkan.so" | sort -V | tail -n 1)
           fi
 
-          if [ ! -d "${NDK_SYSROOT}/usr/include/vulkan" ] || [ ! -f "${VULKAN_LIB}" ]; then
-            echo "Error: Could not locate Android NDK Vulkan headers or libvulkan.so (ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT})"
+          if [ ! -f "${VULKAN_LIB}" ]; then
+            echo "Error: Could not locate Android NDK libvulkan.so (ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT})"
             exit 1
           fi
 
-          # Sync host Vulkan 1.4 C/C++ headers and vk_video directory into NDK sysroot
-          for hdr in /usr/include/vulkan/*; do
-            base=$(basename "$hdr")
-            if [ "$base" != "vulkan_android.h" ]; then
-              ln -sf "$hdr" "${NDK_SYSROOT}/usr/include/vulkan/${base}"
-            fi
-          done
-          if [ -d /usr/include/vk_video ]; then
-            ln -sfn /usr/include/vk_video "${NDK_SYSROOT}/usr/include/vk_video"
+          # Locate the exact directory containing vulkan/vulkan.hpp and vk_video/ on the host
+          VULKAN_HPP_PATH=$(find /usr -name "vulkan.hpp" 2>/dev/null | head -n 1)
+          if [ -z "${VULKAN_HPP_PATH}" ]; then
+            echo "Error: Could not locate vulkan.hpp on the host."
+            exit 1
           fi
+          VULKAN_INC_DIR=$(dirname "$(dirname "${VULKAN_HPP_PATH}")")
 
           SPIRV_HEADERS_CONFIG=$(find /usr -name "SPIRV-HeadersConfig.cmake" 2>/dev/null | head -n 1)
           if [ -z "${SPIRV_HEADERS_CONFIG}" ]; then
@@ -122,7 +119,7 @@ jobs:
           SPIRV_HEADERS_DIR=$(dirname "${SPIRV_HEADERS_CONFIG}")
 
           echo "Using pre-installed NDK: ${ANDROID_NDK_ROOT}"
-          echo "Using Vulkan include: ${NDK_SYSROOT}/usr/include"
+          echo "Using Vulkan include: ${VULKAN_INC_DIR}"
           echo "Using Vulkan library: ${VULKAN_LIB}"
           echo "Using SPIRV-Headers: ${SPIRV_HEADERS_DIR}"
 
@@ -132,7 +129,7 @@ jobs:
             -DCMAKE_SYSTEM_VERSION="${{ inputs.android_api }}" \
             -DGGML_HEXAGON_ARCHS="${HEXAGON_ARCH}" \
             -DGGML_VULKAN=ON \
-            -DVulkan_INCLUDE_DIR="${NDK_SYSROOT}/usr/include" \
+            -DVulkan_INCLUDE_DIR="${VULKAN_INC_DIR}" \
             -DVulkan_LIBRARY="${VULKAN_LIB}" \
             -DSPIRV-Headers_DIR="${SPIRV_HEADERS_DIR}" \
             -DLLAMA_SERVER_WEBUI=OFF \
