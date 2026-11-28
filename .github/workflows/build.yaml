@@ -103,7 +103,7 @@ jobs:
             exit 1
           fi
 
-          # Assemble a standalone Vulkan include directory so CMake never strips -I/usr/include
+          # Assemble a standalone Vulkan + SPIR-V include directory so CMake never strips -I/usr/include
           VULKAN_INC_DIR="${RUNNER_TEMP}/vulkan-headers"
           rm -rf "${VULKAN_INC_DIR}"
           mkdir -p "${VULKAN_INC_DIR}"
@@ -118,12 +118,9 @@ jobs:
           cp -rL "${HOST_VK_ROOT}/vulkan" "${VULKAN_INC_DIR}/"
           if [ -d "${HOST_VK_ROOT}/vk_video" ]; then
             cp -rL "${HOST_VK_ROOT}/vk_video" "${VULKAN_INC_DIR}/"
-          else
-            VK_VIDEO_PATH=$(find /usr -name "vulkan_video_codec_av1std.h" 2>/dev/null | head -n 1)
-            if [ -n "${VK_VIDEO_PATH}" ]; then
-              mkdir -p "${VULKAN_INC_DIR}/vk_video"
-              cp -L "$(dirname "${VK_VIDEO_PATH}")"/* "${VULKAN_INC_DIR}/vk_video/"
-            fi
+          fi
+          if [ -d "/usr/include/spirv" ]; then
+            cp -rL "/usr/include/spirv" "${VULKAN_INC_DIR}/"
           fi
           if [ -f "${NDK_SYSROOT}/usr/include/vulkan/vulkan_android.h" ]; then
             cp -L "${NDK_SYSROOT}/usr/include/vulkan/vulkan_android.h" "${VULKAN_INC_DIR}/vulkan/"
@@ -138,7 +135,6 @@ jobs:
 
           echo "Using pre-installed NDK: ${ANDROID_NDK_ROOT}"
           echo "Using Vulkan include: ${VULKAN_INC_DIR}"
-          ls -la "${VULKAN_INC_DIR}" "${VULKAN_INC_DIR}/vk_video" || true
           echo "Using Vulkan library: ${VULKAN_LIB}"
           echo "Using SPIRV-Headers: ${SPIRV_HEADERS_DIR}"
 
