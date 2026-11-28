@@ -28,7 +28,7 @@ permissions:
   contents: write
 
 jobs:
-  build-android-all-backends:
+  build:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/snapdragon-toolchain/arm64-android:${{ inputs.snapdragon_toolchain }}
