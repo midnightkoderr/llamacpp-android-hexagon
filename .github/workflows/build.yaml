@@ -147,6 +147,7 @@ jobs:
             -DVulkan_INCLUDE_DIR="${VULKAN_INC_DIR}" \
             -DVulkan_LIBRARY="${VULKAN_LIB}" \
             -DSPIRV-Headers_DIR="${SPIRV_HEADERS_DIR}" \
+            -DLLAMA_BUILD_WEBUI=OFF \
             -DLLAMA_SERVER_WEBUI=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
