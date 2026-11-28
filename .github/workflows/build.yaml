@@ -1,4 +1,4 @@
-name: Build llama.cpp for Snapdragon Hexagon NPU (Android)
+name: Build llama.cpp for Android (CPU + Hexagon NPU + Vulkan/OpenCL GPU)
 
 on:
   workflow_dispatch:
@@ -11,15 +11,176 @@ on:
         description: 'Hexagon architecture(s) to build for, separated by semicolons'
         required: false
         default: 'v73;v75'
+      snapdragon_toolchain:
+        description: 'Snapdragon toolchain version'
+        required: false
+        default: 'v0.8'
+      preset_file:
+        description: 'Path to the CMakeUserPresets.json file'
+        required: false
+        default: 'docs/backend/snapdragon/CMakeUserPresets.json'
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-android-all-backends:
     runs-on: ubuntu-latest
-    # container:
-    #   image: ghcr.io/snapdragon-toolchain/arm64-android:v0.8
-    #   options: --platform linux/amd64
+    container:
+      image: ghcr.io/snapdragon-toolchain/arm64-android:${{ inputs.snapdragon_toolchain }}
+      options: --platform linux/amd64
 
     steps:
-      - name: Test vars
+      - name: Initialize Paths
         run: |
-          echo "LLAMA_REF=${{ inputs.llama_ref }}"
+          echo "ARTIFACT_DIR=${RUNNER_TEMP}/staging" >> "$GITHUB_ENV"
+          echo "SNAPDRAGON_BUILD_DIR=${RUNNER_TEMP}/build-snapdragon" >> "$GITHUB_ENV"
+
+      - name: Install Host Vulkan Shader Tools
+        run: |
+          apt-get update -qq && apt-get install -y --no-install-recommends \
+            libvulkan-dev \
+            glslang-tools \
+            glslc
+
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ inputs.llama_ref || 'master' }}
+
+      - name: Set Release Metadata
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=android-all-${SHORT_SHA}" >> "$GITHUB_ENV"
+
+      - name: Check if CMakeUserPresets.json exists
+        run: |
+          preset_file="${{ inputs.preset_file }}"
+          if [ ! -f "${preset_file}" ]; then
+            echo "Error: Could not find ${preset_file}."
+            exit 1
+          fi
+          echo "PRESET_FILE=${preset_file}" >> "$GITHUB_ENV"
+
+      - name: Set Hexagon Architecture
+        run: |
+          HEX_ARCH="${{ inputs.hexagon_arch }}"
+
+          HTP_TARGETS=""
+          for arch in $(echo "${HEX_ARCH}" | tr ';' ' '); do
+            HTP_TARGETS="${HTP_TARGETS} htp-$arch"
+          done
+
+          echo "HEXAGON_ARCH=${HEX_ARCH}" >> "$GITHUB_ENV"
+          echo "HTP_TARGETS=${HTP_TARGETS}" >> "$GITHUB_ENV"
+
+      - name: Configure CMake (CPU + Hexagon + Vulkan + OpenCL)
+        run: |
+          rm -rf "${SNAPDRAGON_BUILD_DIR}"
+          cp "${PRESET_FILE}" .
+
+          # Detect NDK path from container environment variables or filesystem
+          NDK_PATH="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}}"
+          if [ -z "${NDK_PATH}" ]; then
+            NDK_PATH=$(find / -maxdepth 4 -type d -name "android-ndk*" 2>/dev/null | head -n 1)
+          fi
+
+          NDK_SYSROOT="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          VULKAN_LIB=$(find "${NDK_SYSROOT}/usr/lib/aarch64-linux-android" -name "libvulkan.so" | sort -V | tail -n 1)
+
+          if [ ! -d "${NDK_SYSROOT}/usr/include/vulkan" ] || [ ! -f "${VULKAN_LIB}" ]; then
+            echo "Error: Could not locate Android NDK Vulkan headers or libvulkan.so (NDK_PATH=${NDK_PATH})"
+            exit 1
+          fi
+
+          echo "Using Vulkan include: ${NDK_SYSROOT}/usr/include"
+          echo "Using Vulkan library: ${VULKAN_LIB}"
+
+          cmake --preset arm64-android-snapdragon-release \
+            -B "${SNAPDRAGON_BUILD_DIR}" \
+            -DGGML_HEXAGON_ARCHS="${HEXAGON_ARCH}" \
+            -DGGML_VULKAN=ON \
+            -DVulkan_INCLUDE_DIR="${NDK_SYSROOT}/usr/include" \
+            -DVulkan_LIBRARY="${VULKAN_LIB}" \
+            -DLLAMA_SERVER_WEBUI=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TOOLS=ON
+
+      - name: Build Binaries and Hexagon Skels
+        run: |
+          cmake --build "${SNAPDRAGON_BUILD_DIR}" \
+            --target llama-cli llama-server llama-bench llama-gguf-split llama-mtmd-cli llama-quantize ${HTP_TARGETS} \
+            --parallel "$(nproc)"
+
+      - name: Package Binaries
+        run: |
+          rm -rf "${ARTIFACT_DIR}"
+          mkdir -p "${ARTIFACT_DIR}/bin" "${ARTIFACT_DIR}/lib"
+
+          for bin in llama-cli llama-server llama-bench llama-gguf-split llama-mtmd-cli llama-quantize; do
+            if [ -f "${SNAPDRAGON_BUILD_DIR}/bin/${bin}" ]; then
+              cp -L "${SNAPDRAGON_BUILD_DIR}/bin/${bin}" "${ARTIFACT_DIR}/bin/"
+            fi
+          done
+
+          find "${SNAPDRAGON_BUILD_DIR}" -name "*.so" -exec cp -L {} "${ARTIFACT_DIR}/lib/" \;
+
+          cat << 'EOF' > "${ARTIFACT_DIR}/run.sh"
+          #!/data/data/com.termux/files/usr/bin/sh
+
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:$LD_LIBRARY_PATH"
+          export ADSP_LIBRARY_PATH="${SCRIPT_DIR}/lib;/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp"
+
+          if [ -z "${1}" ]; then
+            echo "Usage: ./run.sh <binary_name> [args...]"
+            echo "Example: ./run.sh llama-cli --list-devices"
+            exit 1
+          fi
+
+          BIN="${1}"
+          shift
+          exec "${SCRIPT_DIR}/bin/${BIN}" "$@"
+          EOF
+          sed -i 's/^          //' "${ARTIFACT_DIR}/run.sh"
+          chmod +x "${ARTIFACT_DIR}/run.sh"
+
+      - name: Create Tarball
+        run: |
+          ARCHIVE_NAME="llama-cpp-android-all-backends.tar.gz"
+          ARCHIVE_PATH="${RUNNER_TEMP}/${ARCHIVE_NAME}"
+          tar --owner=1000 --group=1000 --numeric-owner \
+            -czvf "${ARCHIVE_PATH}" -C "${ARTIFACT_DIR}" .
+
+          (cd "${RUNNER_TEMP}" && sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256")
+          CHECKSUM_PATH="${RUNNER_TEMP}/${ARCHIVE_NAME}.sha256"
+          ARCHIVE_SHA256=$(awk '{print $1}' "${CHECKSUM_PATH}")
+
+          echo "ARCHIVE_PATH=${ARCHIVE_PATH}" >> "$GITHUB_ENV"
+          echo "CHECKSUM_PATH=${CHECKSUM_PATH}" >> "$GITHUB_ENV"
+          echo "ARCHIVE_SHA256=${ARCHIVE_SHA256}" >> "$GITHUB_ENV"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: |
+            ${{ env.ARCHIVE_PATH }}
+            ${{ env.CHECKSUM_PATH }}
+          archive: false
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "llama.cpp Android All Backends (${{ env.HEXAGON_ARCH }}) - ${{ env.SHORT_SHA }}"
+          body: |
+            Automated Android ARM64 build of `llama.cpp` with CPU, Hexagon NPU, Vulkan, and OpenCL support.
+            - **llama.cpp ref:** `${{ inputs.llama_ref || 'master' }}` (`${{ env.SHORT_SHA }}`)
+            - **Hexagon Archs:** `${{ env.HEXAGON_ARCH }}`
+            - **Build Date:** `$(date -u +"%Y-%m-%dT%H:%M:%SZ")`
+          files: |
+            ${{ env.ARCHIVE_PATH }}
+            ${{ env.CHECKSUM_PATH }}
