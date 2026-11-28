@@ -45,6 +45,7 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y --no-install-recommends \
             libvulkan-dev \
+            spirv-headers \
             glslang-tools \
             glslc
 
@@ -102,9 +103,17 @@ jobs:
             exit 1
           fi
 
+          SPIRV_HEADERS_CONFIG=$(find /usr -name "SPIRV-HeadersConfig.cmake" 2>/dev/null | head -n 1)
+          if [ -z "${SPIRV_HEADERS_CONFIG}" ]; then
+            echo "Error: Could not locate SPIRV-HeadersConfig.cmake on the host."
+            exit 1
+          fi
+          SPIRV_HEADERS_DIR=$(dirname "${SPIRV_HEADERS_CONFIG}")
+
           echo "Using pre-installed NDK: ${ANDROID_NDK_ROOT}"
           echo "Using Vulkan include: ${NDK_SYSROOT}/usr/include"
           echo "Using Vulkan library: ${VULKAN_LIB}"
+          echo "Using SPIRV-Headers: ${SPIRV_HEADERS_DIR}"
 
           cmake --preset arm64-android-snapdragon-release \
             -B "${SNAPDRAGON_BUILD_DIR}" \
@@ -114,6 +123,7 @@ jobs:
             -DGGML_VULKAN=ON \
             -DVulkan_INCLUDE_DIR="${NDK_SYSROOT}/usr/include" \
             -DVulkan_LIBRARY="${VULKAN_LIB}" \
+            -DSPIRV-Headers_DIR="${SPIRV_HEADERS_DIR}" \
             -DLLAMA_SERVER_WEBUI=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
