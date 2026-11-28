@@ -19,10 +19,6 @@ on:
         description: 'Path to the CMakeUserPresets.json file'
         required: false
         default: 'docs/backend/snapdragon/CMakeUserPresets.json'
-      ndk_revision:
-        description: 'Android NDK revision'
-        required: false
-        default: 'r30'
       android_api:
         description: 'Android API level'
         required: false
@@ -45,22 +41,12 @@ jobs:
           echo "SNAPDRAGON_BUILD_DIR=${RUNNER_TEMP}/build-snapdragon" >> "$GITHUB_ENV"
           echo "DIST_DIR=${GITHUB_WORKSPACE}/dist" >> "$GITHUB_ENV"
 
-      - name: Install Host Tools and Vulkan Shader Compilers
+      - name: Install Host Vulkan Shader Compilers
         run: |
           apt-get update -qq && apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            unzip \
             libvulkan-dev \
             glslang-tools \
             glslc
-
-      - name: Set up Android NDK ${{ inputs.ndk_revision }}
-        uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: ${{ inputs.ndk_revision }}
-          add-to-path: false
 
       - name: Checkout llama.cpp
         uses: actions/checkout@v4
@@ -71,10 +57,8 @@ jobs:
       - name: Set Release Metadata
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
           SHORT_SHA=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=android-all-${SHORT_SHA}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
@@ -105,8 +89,7 @@ jobs:
           rm -rf "${SNAPDRAGON_BUILD_DIR}"
           cp "${PRESET_FILE}" .
 
-          NDK_PATH="${{ steps.ndk.outputs.ndk-path }}"
-          NDK_SYSROOT="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          NDK_SYSROOT="${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           VULKAN_LIB="${NDK_SYSROOT}/usr/lib/aarch64-linux-android/${{ inputs.android_api }}/libvulkan.so"
 
           if [ ! -f "${VULKAN_LIB}" ]; then
@@ -115,18 +98,16 @@ jobs:
           fi
 
           if [ ! -d "${NDK_SYSROOT}/usr/include/vulkan" ] || [ ! -f "${VULKAN_LIB}" ]; then
-            echo "Error: Could not locate Android NDK Vulkan headers or libvulkan.so (NDK_PATH=${NDK_PATH})"
+            echo "Error: Could not locate Android NDK Vulkan headers or libvulkan.so (ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT})"
             exit 1
           fi
 
-          echo "Using NDK: ${NDK_PATH}"
+          echo "Using pre-installed NDK: ${ANDROID_NDK_ROOT}"
           echo "Using Vulkan include: ${NDK_SYSROOT}/usr/include"
           echo "Using Vulkan library: ${VULKAN_LIB}"
 
           cmake --preset arm64-android-snapdragon-release \
             -B "${SNAPDRAGON_BUILD_DIR}" \
-            -DCMAKE_ANDROID_NDK="${NDK_PATH}" \
-            -DANDROID_NDK="${NDK_PATH}" \
             -DANDROID_PLATFORM="android-${{ inputs.android_api }}" \
             -DCMAKE_SYSTEM_VERSION="${{ inputs.android_api }}" \
             -DGGML_HEXAGON_ARCHS="${HEXAGON_ARCH}" \
@@ -208,7 +189,7 @@ jobs:
             Automated Android ARM64 build of `llama.cpp` with CPU, Hexagon NPU, Vulkan, and OpenCL support.
             - **llama.cpp ref:** `${{ inputs.llama_ref || 'master' }}` (`${{ env.SHORT_SHA }}`)
             - **Hexagon Archs:** `${{ env.HEXAGON_ARCH }}`
-            - **Android NDK / API:** `${{ inputs.ndk_revision }}` (API `${{ inputs.android_api }}`)
+            - **Android NDK / API:** `${{ env.ANDROID_NDK_VERSION }}` (API `${{ inputs.android_api }}`)
             - **Build Date:** `${{ env.BUILD_DATE }}`
             - **SHA-256:** `${{ env.ARCHIVE_SHA256 }}`
           files: dist/*
