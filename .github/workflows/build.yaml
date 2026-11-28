@@ -43,6 +43,7 @@ jobs:
         run: |
           echo "ARTIFACT_DIR=${RUNNER_TEMP}/staging" >> "$GITHUB_ENV"
           echo "SNAPDRAGON_BUILD_DIR=${RUNNER_TEMP}/build-snapdragon" >> "$GITHUB_ENV"
+          echo "DIST_DIR=${GITHUB_WORKSPACE}/dist" >> "$GITHUB_ENV"
 
       - name: Install Host Tools and Vulkan Shader Compilers
         run: |
@@ -69,8 +70,11 @@ jobs:
 
       - name: Set Release Metadata
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
           SHORT_SHA=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
           echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=android-all-${SHORT_SHA}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
@@ -173,15 +177,17 @@ jobs:
           sed -i 's/^          //' "${ARTIFACT_DIR}/run.sh"
           chmod +x "${ARTIFACT_DIR}/run.sh"
 
-      - name: Create Tarball and SHA256
+      - name: Create Tarball and SHA256 in dist/
         run: |
+          mkdir -p "${DIST_DIR}"
           ARCHIVE_NAME="llama-cpp-android-all-backends.tar.gz"
-          ARCHIVE_PATH="${RUNNER_TEMP}/${ARCHIVE_NAME}"
+          ARCHIVE_PATH="${DIST_DIR}/${ARCHIVE_NAME}"
+
           tar --owner=1000 --group=1000 --numeric-owner \
             -czvf "${ARCHIVE_PATH}" -C "${ARTIFACT_DIR}" .
 
-          (cd "${RUNNER_TEMP}" && sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256")
-          CHECKSUM_PATH="${RUNNER_TEMP}/${ARCHIVE_NAME}.sha256"
+          (cd "${DIST_DIR}" && sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256")
+          CHECKSUM_PATH="${DIST_DIR}/${ARCHIVE_NAME}.sha256"
           ARCHIVE_SHA256=$(awk '{print $1}' "${CHECKSUM_PATH}")
 
           echo "ARCHIVE_PATH=${ARCHIVE_PATH}" >> "$GITHUB_ENV"
@@ -191,9 +197,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          path: |
-            ${{ env.ARCHIVE_PATH }}
-            ${{ env.CHECKSUM_PATH }}
+          path: dist/*
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -207,6 +211,4 @@ jobs:
             - **Android NDK / API:** `${{ inputs.ndk_revision }}` (API `${{ inputs.android_api }}`)
             - **Build Date:** `${{ env.BUILD_DATE }}`
             - **SHA-256:** `${{ env.ARCHIVE_SHA256 }}`
-          files: |
-            ${{ env.ARCHIVE_PATH }}
-            ${{ env.CHECKSUM_PATH }}
+          files: dist/*
