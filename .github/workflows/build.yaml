@@ -103,8 +103,13 @@ jobs:
             exit 1
           fi
 
-          # Android NDK ships C headers (vulkan.h) but omits C++ bindings (vulkan.hpp); link them from host libvulkan-dev
-          ln -sf /usr/include/vulkan/*.hpp "${NDK_SYSROOT}/usr/include/vulkan/"
+          # Sync host Vulkan 1.4 C and C++ headers (except vulkan_android.h) so vulkan.hpp matches vulkan_core.h
+          for hdr in /usr/include/vulkan/*; do
+            base=$(basename "$hdr")
+            if [ "$base" != "vulkan_android.h" ]; then
+              ln -sf "$hdr" "${NDK_SYSROOT}/usr/include/vulkan/${base}"
+            fi
+          done
 
           SPIRV_HEADERS_CONFIG=$(find /usr -name "SPIRV-HeadersConfig.cmake" 2>/dev/null | head -n 1)
           if [ -z "${SPIRV_HEADERS_CONFIG}" ]; then
